@@ -1,0 +1,11 @@
+:root {
+    --cor-primaria: #093390;
+    --cor-fundo: #F9F9F6;
+}
+
+body {
+    background-color: var(--cor-fundo);
+    margin: 0;
+    font-family: Arial, sans-serif;
+    color: #1A1A1A;
+}
