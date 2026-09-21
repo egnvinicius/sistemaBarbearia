@@ -54,6 +54,12 @@
     }
 
     async function confirmarAgendamento() {
+        // Bloqueio de segurança: impede o admin de tentar agendar sem cliente selecionado
+        if (!cliente) {
+            exibirToast('Modo Visualização: Faça login via WhatsApp para simular um agendamento real.', false);
+            return;
+        }
+
         const payload = {
             cliente_id: cliente.id,
             profissional_id: profissionalId,
@@ -81,69 +87,76 @@
         const salvo = localStorage.getItem('cliente_barbearia');
         if (salvo) {
             cliente = JSON.parse(salvo);
-            carregarDadosIniciais();
         }
+        carregarDadosIniciais();
     });
 
-    $: if (cliente && profissionalId && dataEscolhida && servicoId) {
+    // Removido a exigência da variável cliente nesta validação reativa
+    $: if (profissionalId && dataEscolhida && servicoId) {
         buscarHorarios();
         horarioSelecionado = null;
     }
 </script>
 
 <div class="cartao-agendamento">
-    {#if cliente}
-        <div class="cabecalho-cliente">
-            <h2 class="titulo-secao">Agende seu Horário</h2>
-            <p class="info-cliente">
+    <!-- Cabeçalho Dinâmico -->
+    <div class="cabecalho-cliente">
+        <h2 class="titulo-secao">Agenda de Horários</h2>
+        <p class="info-cliente">
+            {#if cliente}
                 Olá, <strong>{cliente.nome.split(' ')[0]}</strong>
-            </p>
-        </div>
+            {:else}
+                <strong style="color: var(--cor-primaria)">Modo Visualização</strong> (Acesso Admin)
+            {/if}
+        </p>
+    </div>
 
-        <div class="filtros-container">
-            <div class="filtros-linha">
-                <div class="campo">
-                    <label>Profissional</label>
-                    <select bind:value={profissionalId}>
-                        {#each profissionais as prof}
-                            <option value={prof.id}>{prof.nome}</option>
-                        {/each}
-                    </select>
-                </div>
-                <div class="campo">
-                    <label>Data</label>
-                    <input type="date" bind:value={dataEscolhida} min={dataMinima} />
-                </div>
-            </div>
+    <!-- Filtros de Busca -->
+    <div class="filtros-container">
+        <div class="filtros-linha">
             <div class="campo">
-                <label>Serviço</label>
-                <select bind:value={servicoId}>
-                    {#each servicos as serv}
-                        <option value={serv.id}>
-                            {serv.nome} - R$ {Number(serv.preco).toFixed(2).replace('.', ',')}
-                        </option>
+                <label>Profissional</label>
+                <select bind:value={profissionalId}>
+                    {#each profissionais as prof}
+                        <option value={prof.id}>{prof.nome}</option>
                     {/each}
                 </select>
             </div>
-        </div>
-
-        {#if horarios.length > 0}
-            <div class="grade-horarios">
-                {#each horarios as hora}
-                    <button class:ativo={horarioSelecionado === hora} on:click={() => horarioSelecionado = hora}>
-                        {hora}
-                    </button>
-                {/each}
+            <div class="campo">
+                <label>Data</label>
+                <input type="date" bind:value={dataEscolhida} min={dataMinima} />
             </div>
-        {:else}
-            <p class="mensagem-vazia">Nenhum horário disponível para esta data.</p>
-        {/if}
+        </div>
+        <div class="campo">
+            <label>Serviço</label>
+            <select bind:value={servicoId}>
+                {#each servicos as serv}
+                    <option value={serv.id}>
+                        {serv.nome} - R$ {Number(serv.preco).toFixed(2).replace('.', ',')}
+                    </option>
+                {/each}
+            </select>
+        </div>
+    </div>
 
-        {#if horarioSelecionado}
-            <button class="btn-confirmar" on:click={confirmarAgendamento}>
-                Confirmar {horarioSelecionado}
-            </button>
-        {/if}
+    <!-- Grade de Horários -->
+    {#if horarios.length > 0}
+        <div class="grade-horarios">
+            {#each horarios as hora}
+                <button class:ativo={horarioSelecionado === hora} on:click={() => horarioSelecionado = hora}>
+                    {hora}
+                </button>
+            {/each}
+        </div>
+    {:else}
+        <p class="mensagem-vazia">Nenhum horário disponível para esta data.</p>
+    {/if}
+
+    <!-- Botão de Confirmação -->
+    {#if horarioSelecionado}
+        <button class="btn-confirmar" on:click={confirmarAgendamento}>
+            Confirmar {horarioSelecionado}
+        </button>
     {/if}
 </div>
 
@@ -154,6 +167,7 @@
 <style>
     .cartao-agendamento { background-color: #ffffff; border: 1px solid #d4d4d4; padding: 30px; margin-top: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
     .titulo-secao { font-family: var(--fonte-principal, 'Playfair Display', serif); font-size: 1.6rem; color: #1A1A1A; margin-top: 0; margin-bottom: 5px; text-align: center; }
+    
     .cabecalho-cliente { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; }
     .info-cliente { font-size: 0.95rem; color: #555; margin: 0; }
     
