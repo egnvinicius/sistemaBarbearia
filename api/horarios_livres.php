@@ -1,96 +1,99 @@
 <?php
-// horarios_livres.php
 header("Content-Type: application/json; charset=UTF-8");
 require_once 'db.php';
 
-// Recebe os parâmetros da URL
 $profissional_id = $_GET['profissional_id'] ?? null;
-$data = $_GET['data'] ?? null; // Formato esperado: YYYY-MM-DD
+$data = $_GET['data'] ?? null;
 $servico_id = $_GET['servico_id'] ?? null;
 
 if (!$profissional_id || !$data || !$servico_id) {
     http_response_code(400);
-    echo json_encode(["erro" => "Parâmetros profissional_id, data e servico_id são obrigatórios."]);
+    echo json_encode(["erro" => "Parâmetros incompletos."]);
     exit;
 }
 
 try {
-    // 1. Descobrir a duração do serviço que o cliente quer agendar
-    $stmt_servico = $pdo->prepare("SELECT duracao_minutos FROM servicos WHERE id = ? AND ativo = 1");
-    $stmt_servico->execute([$servico_id]);
-    $servico = $stmt_servico->fetch();
-
-    if (!$servico) {
-        http_response_code(404);
-        echo json_encode(["erro" => "Serviço não encontrado."]);
+    // 1. Validação de Ausência/Falta do Profissional
+    $stmtAusencia = $pdo->prepare("SELECT id FROM ausencias_profissionais WHERE profissional_id = ? AND data_ausencia = ?");
+    $stmtAusencia->execute([$profissional_id, $data]);
+    if ($stmtAusencia->fetch()) {
+        // Profissional de folga: retorna grade vazia
+        echo json_encode(["data" => $data, "horarios" => []]);
         exit;
     }
-    $duracao_minutos = $servico['duracao_minutos'];
 
-    // 2. Buscar todos os agendamentos do profissional NAQUELE DIA
-    $stmt_agendamentos = $pdo->prepare("
-        SELECT data_hora_inicio, data_hora_fim 
+    // 2. Validação do Horário de Funcionamento (Dia da Semana)
+    // No PHP, date('w') retorna: 0 (Dom), 1 (Seg) ... 6 (Sáb)
+    $dia_semana = date('w', strtotime($data));
+    $stmtHorario = $pdo->prepare("SELECT hora_abertura, hora_fechamento FROM horarios_funcionamento WHERE dia_semana = ? AND ativo = 1");
+    $stmtHorario->execute([$dia_semana]);
+    $funcionamento = $stmtHorario->fetch();
+
+    if (!$funcionamento) {
+        // Loja fechada no dia da semana escolhido
+        echo json_encode(["data" => $data, "horarios" => []]);
+        exit;
+    }
+
+    // 3. Consulta da Duração do Serviço
+    $stmtServico = $pdo->prepare("SELECT duracao_minutos FROM servicos WHERE id = ?");
+    $stmtServico->execute([$servico_id]);
+    $servico = $stmtServico->fetch();
+    $duracao = $servico ? (int)$servico['duracao_minutos'] : 30;
+
+    // 4. Mapeamento de Agendamentos Existentes
+    $stmtAgendamentos = $pdo->prepare("
+        SELECT TIME(data_hora_inicio) as hora_inicio, TIME(data_hora_fim) as hora_fim 
         FROM agendamentos 
         WHERE profissional_id = ? 
           AND DATE(data_hora_inicio) = ? 
-          AND status != 'cancelado'
+          AND status NOT IN ('cancelado', 'ausente')
     ");
-    $stmt_agendamentos->execute([$profissional_id, $data]);
-    $agendamentos_do_dia = $stmt_agendamentos->fetchAll();
+    $stmtAgendamentos->execute([$profissional_id, $data]);
+    $agendamentos = $stmtAgendamentos->fetchAll();
 
-    // 3. Definir o horário de expediente (ex: 09:00 às 19:00)
-    $inicio_expediente = new DateTime("$data 09:00:00");
-    $fim_expediente = new DateTime("$data 19:00:00");
-    
-    // Vamos varrer a agenda de 15 em 15 minutos para achar as vagas
-    $intervalo_varredura = new DateInterval('PT15M');
-    $slot_atual = clone $inicio_expediente;
-    
+    // 5. Geração e Filtragem dos Slots
     $horarios_disponiveis = [];
+    $inicio_loop = strtotime($data . ' ' . $funcionamento['hora_abertura']);
+    $fim_expediente = strtotime($data . ' ' . $funcionamento['hora_fechamento']);
+    $agora = time();
+    $eh_hoje = (strtotime($data) == strtotime(date('Y-m-d')));
 
-    // 4. Lógica de Varredura e Colisão
-    while ($slot_atual < $fim_expediente) {
-        // Calcula onde esse possível agendamento terminaria
-        $slot_fim = clone $slot_atual;
-        $slot_fim->modify("+$duracao_minutos minutes");
+    while ($inicio_loop < $fim_expediente) {
+        $fim_previsto = $inicio_loop + ($duracao * 60);
+        
+        // Bloqueia se o corte passar do horário de fechar a loja
+        if ($fim_previsto > $fim_expediente) break;
 
-        // Se o serviço terminar depois do horário de fechamento, encerra a busca
-        if ($slot_fim > $fim_expediente) {
-            break; 
-        }
-
+        $inicio_str = date('H:i:s', $inicio_loop);
+        $fim_previsto_str = date('H:i:s', $fim_previsto);
         $conflito = false;
 
-        // Bate o slot atual com os agendamentos já existentes no banco
-        foreach ($agendamentos_do_dia as $agendado) {
-            $ag_inicio = new DateTime($agendado['data_hora_inicio']);
-            $ag_fim = new DateTime($agendado['data_hora_fim']);
+        // Bloqueia horários que já passaram (se o cliente estiver agendando para hoje)
+        if ($eh_hoje && $inicio_loop <= $agora) {
+            $conflito = true;
+        }
 
-            // Regra de Overlap (Sobreposição)
-            if ($slot_atual < $ag_fim && $slot_fim > $ag_inicio) {
+        // Verifica choque com outros agendamentos do profissional
+        foreach ($agendamentos as $agendado) {
+            if ($inicio_str < $agendado['hora_fim'] && $fim_previsto_str > $agendado['hora_inicio']) {
                 $conflito = true;
-                break; // Achou conflito, aborta a verificação desse slot
+                break;
             }
         }
 
-        // Se passou por toda a agenda do dia e não teve conflito, a vaga é real!
         if (!$conflito) {
-            $horarios_disponiveis[] = $slot_atual->format('H:i');
+            $horarios_disponiveis[] = date('H:i', $inicio_loop);
         }
 
-        // Avança 15 minutos para testar o próximo bloco
-        $slot_atual->add($intervalo_varredura);
+        // Avança de 15 em 15 minutos para montar a grade
+        $inicio_loop += (15 * 60); 
     }
 
-    // Retorna a lista de horários limpa para o front-end montar os botões
-    echo json_encode([
-        "data" => $data,
-        "profissional_id" => $profissional_id,
-        "horarios" => $horarios_disponiveis
-    ]);
+    echo json_encode(["data" => $data, "horarios" => $horarios_disponiveis]);
 
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(["erro" => "Erro interno: " . $e->getMessage()]);
+    echo json_encode(["erro" => "Falha ao processar a grade de horários."]);
 }
 ?>

@@ -2,7 +2,7 @@
 header("Content-Type: application/json; charset=UTF-8");
 require_once 'db.php';
 
-$stmt = $pdo->query("SELECT nome_fantasia, cor_primaria, cor_fundo, logo_url FROM configuracoes_app LIMIT 1");
+$stmt = $pdo->query("SELECT nome_fantasia, cor_primaria, cor_fundo, logo_url, fonte_app FROM configuracoes_app LIMIT 1");
 $config = $stmt->fetch();
 
 // Força um retorno estruturado se o banco não trouxer resultados

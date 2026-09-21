@@ -1,52 +1,80 @@
 <script>
     import { onMount } from 'svelte';
     import Agendamento from './components/Agendamento.svelte';
+    import Admin from './components/Admin.svelte';
+    import Login from './components/Login.svelte';
     
-    // 1. Inicializamos todas as propriedades para evitar qualquer erro de undefined
+    let adminAutenticado = !!localStorage.getItem('admin_token');
+    let clienteAutenticado = !!localStorage.getItem('cliente_barbearia');
+    
+    // Se for admin, por padrão abre a tela de admin. Se não, modoAdmin fica falso.
+    let modoAdmin = adminAutenticado; 
+    
     let config = {
         nome_fantasia: 'Carregando...',
         logo_url: '',
-        cor_primaria: '#093390',
-        cor_fundo: '#F9F9F6'
+        cor_primaria: '#1A1A1A',
+        cor_fundo: '#F9F9F6',
+        fonte_app: 'Arial, sans-serif'
     };
 
     onMount(async () => {
         try {
             const res = await fetch('/api/config.php');
-            
-            // 2. Lemos a resposta como texto bruto antes de converter para JSON
-            const textoResposta = await res.text();
-            
-            // 3. Imprimimos no console para você debugar (F12 no navegador)
-            console.log("Status HTTP:", res.status);
-            console.log("Resposta bruta do servidor:", textoResposta);
-
             if (res.ok) {
-                // 4. Converte para JSON e atualiza as variáveis
-                const dados = JSON.parse(textoResposta);
-                config = dados;
-                
+                config = await res.json();
                 document.documentElement.style.setProperty('--cor-primaria', config.cor_primaria);
                 document.documentElement.style.setProperty('--cor-fundo', config.cor_fundo);
-            } else {
-                config.nome_fantasia = 'Erro de Servidor';
+                document.documentElement.style.setProperty('--fonte-principal', config.fonte_app);
             }
         } catch (erro) {
-            console.error("Erro no Fetch ou no Parse:", erro);
-            config.nome_fantasia = 'Erro de Conexão';
+            console.error(erro);
         }
     });
+
+    function logoutGeral() {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('cliente_barbearia');
+        adminAutenticado = false;
+        clienteAutenticado = false;
+        modoAdmin = false;
+    }
 </script>
 
-<main>
+<main style="font-family: var(--fonte-principal);">
     <header>
-        <h1>{config.nome_fantasia}</h1>
+        <div class="header-marca">
+            {#if config.logo_url}
+                <img src={config.logo_url} alt="Logo" class="logo-img" />
+            {/if}
+            <h1>{config.nome_fantasia}</h1>
+        </div>
+        
+        <div class="acoes-header">
+            {#if adminAutenticado}
+                <button class="nav-toggle" on:click={() => modoAdmin = !modoAdmin}>
+                    {modoAdmin ? 'Ver Agenda' : 'Área Gerencial'}
+                </button>
+            {/if}
+
+            {#if adminAutenticado || clienteAutenticado}
+                <button class="nav-toggle sair" on:click={logoutGeral}>Sair</button>
+            {/if}
+        </div>
     </header>
     
     <div class="container">
-        <div class="container">
+        <!-- Roteamento Condicional -->
+        {#if !adminAutenticado && !clienteAutenticado}
+            <Login 
+                on:sucesso_cliente={() => clienteAutenticado = true}
+                on:sucesso_admin={() => { adminAutenticado = true; modoAdmin = true; }} 
+            />
+        {:else if adminAutenticado && modoAdmin}
+            <Admin />
+        {:else}
             <Agendamento />
-        </div>
+        {/if}
     </div>
 </main>
 
@@ -55,17 +83,47 @@
         background-color: var(--cor-primaria);
         color: white;
         padding: 20px;
-        text-align: center;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 
-    h1 {
-        margin: 0;
-        font-size: 1.5rem;
+    .header-marca {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .logo-img {
+        max-height: 40px;
+        border-radius: 4px;
+        object-fit: contain;
+    }
+
+    h1 { margin: 0; font-size: 1.5rem; }
+
+    .acoes-header {
+        display: flex;
+        gap: 10px;
+    }
+
+    .nav-toggle {
+        background: transparent;
+        color: white;
+        border: 1px solid white;
+        padding: 5px 15px;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+
+    .sair {
+        border-color: #ffcccc;
+        color: #ffcccc;
     }
 
     .container {
         padding: 20px;
-        max-width: 600px;
+        max-width: 1200px;
         margin: 0 auto;
     }
 </style>
